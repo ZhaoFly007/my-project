@@ -1,0 +1,68 @@
+import java.util.Scanner;
+
+public class BankAccountSystem {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+        // 使用 long 存储余额，初始值为 0
+        long balance = 0L;
+
+        // 无限循环，直到用户选择退出
+        while (true) {
+            System.out.println("========== 银行账户管理系统 ==========");
+            System.out.println("1. 存款");
+            System.out.println("2. 取款");
+            System.out.println("3. 查询余额");
+            System.out.println("4. 退出");
+            System.out.print("请选择操作：");
+
+            int choice = scanner.nextInt();
+
+            switch (choice) {
+                case 1:
+                    // 存款
+                    System.out.print("请输入存款金额：");
+                    long depositAmount = scanner.nextLong();
+
+                    if (depositAmount <= 0) {
+                        System.out.println("存款金额必须大于 0！");
+                    } else {
+                        balance += depositAmount;
+                        System.out.println("存款成功，当前余额：" + balance);
+                    }
+                    break;
+
+                case 2:
+                    // 取款
+                    System.out.print("请输入取款金额：");
+                    long withdrawAmount = scanner.nextLong();
+
+                    if (withdrawAmount <= 0) {
+                        System.out.println("取款金额必须大于 0！");
+                    } else if (withdrawAmount > balance) {
+                        System.out.println("余额不足");
+                    } else {
+                        balance -= withdrawAmount;
+                        System.out.println("取款成功，当前余额：" + balance);
+                    }
+                    break;
+
+                case 3:
+                    // 查询余额
+                    System.out.println("当前余额：" + balance);
+                    break;
+
+                case 4:
+                    // 退出
+                    System.out.println("谢谢使用！");
+                    scanner.close();
+                    return;
+
+                default:
+                    System.out.println("无效选项，请重新输入！");
+            }
+
+            System.out.println();
+        }
+    }
+}

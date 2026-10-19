@@ -1,0 +1,27 @@
+public class GraduateStudent extends Student {
+    // 新增属性
+    private String advisor;
+
+    // 构造方法
+    public GraduateStudent(String name, String studentId, int score, String advisor) {
+        // 必须先调用父类的构造方法，把前三个参数传给父类去初始化
+        super(name, studentId, score); 
+        this.advisor = advisor;
+    }
+
+    // 新增属性的 getter/setter
+    public String getAdvisor() { return advisor; }
+    public void setAdvisor(String advisor) { this.advisor = advisor; }
+
+    // 重写父类的 introduce 方法
+    @Override
+    public void introduce() {
+        // 可以通过 getName() 等方法获取父类私有属性
+        System.out.println("我是" + getName() + "，学号" + getStudentId() + "，成绩" + getScore() + "，我的导师是" + advisor);
+    }
+
+    // 新增特有方法
+    public void research() {
+        System.out.println("我在做科研");
+    }
+}

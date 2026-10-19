@@ -1,0 +1,51 @@
+public class Student {
+    // 属性全部 private
+    private String name;
+    private String studentId;
+    private int score;
+
+    // 无参构造方法
+    public Student() {
+        // 如果不写这行，Java 也会给默认值：null, null, 0
+        this.name = "";
+        this.studentId = "";
+        this.score = 0;
+    }
+
+    // 有参构造方法
+    public Student(String name, String studentId, int score) {
+        this.name = name;
+        this.studentId = studentId;
+        this.score = score;
+    }
+
+    // 为每个属性提供 getter / setter
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getStudentId() {
+        return studentId;
+    }
+
+    public void setStudentId(String studentId) {
+        this.studentId = studentId;
+    }
+
+    public int getScore() {
+        return score;
+    }
+
+    public void setScore(int score) {
+        this.score = score;
+    }
+
+    // introduce 方法
+    public void introduce() {
+        System.out.println("我是" + name + "，学号" + studentId + "，成绩" + score);
+    }
+}

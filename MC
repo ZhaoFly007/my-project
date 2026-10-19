@@ -1,0 +1,181 @@
+public class Item {
+    private String name;
+    private int maxStackSize;
+
+    public Item(String name, int maxStackSize) {
+        this.name = name;
+        this.maxStackSize = maxStackSize;
+    }
+
+    public String getName() { return name; }
+    public int getMaxStackSize() { return maxStackSize; }
+}
+
+public class ItemStack {
+    private Item item;
+    private int quantity;
+
+    public ItemStack(Item item, int quantity) {
+        this.item = item;
+        this.quantity = quantity;
+    }
+
+    public Item getItem() { return item; }
+    public int getQuantity() { return quantity; }
+    public void setQuantity(int quantity) { this.quantity = quantity; }
+
+    @Override
+    public String toString() {
+        return item.getName() + " x " + quantity;
+    }
+}
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
+public class Inventory {
+    private List<ItemStack> items;
+    private int capacity;
+
+    public Inventory(int capacity) {
+        this.capacity = capacity;
+        this.items = new ArrayList<>(); // 使用动态数组存放已有的物品堆
+    }
+
+    /**
+     * 添加物品
+     * @param itemStackToAdd 要添加的物品堆
+     * @return 返回剩余容量（成功时），如果装不下，返回负数（表示剩余未能放入的数量）
+     */
+    public int addItem(ItemStack itemStackToAdd) {
+        Item item = itemStackToAdd.getItem();
+        int remainingToAdd = itemStackToAdd.getQuantity();
+
+        // 1. 先尝试堆叠到已有的未满同类物品堆中
+        for (ItemStack stack : items) {
+            if (stack.getItem().getName().equals(item.getName())) {
+                int space = item.getMaxStackSize() - stack.getQuantity();
+                if (space > 0) {
+                    int transfer = Math.min(space, remainingToAdd);
+                    stack.setQuantity(stack.getQuantity() + transfer);
+                    remainingToAdd -= transfer;
+                }
+                if (remainingToAdd == 0) break;
+            }
+        }
+
+        // 2. 如果还有剩余，放入空格子（新建物品堆）
+        while (remainingToAdd > 0 && items.size() < capacity) {
+            int take = Math.min(item.getMaxStackSize(), remainingToAdd);
+            items.add(new ItemStack(item, take));
+            remainingToAdd -= take;
+        }
+
+        // 3. 处理溢出
+        if (remainingToAdd > 0) {
+            // 背包满了，返回剩余未能放入的数量（负数）
+            return -remainingToAdd;
+        }
+        
+        // 成功放入，返回背包剩余容量
+        return capacity - items.size();
+    }
+
+    /**
+     * 移除指定数量的物品
+     */
+    public void removeItem(String itemName, int amountToRemove) {
+        int remainingToRemove = amountToRemove;
+
+        
+        Iterator<ItemStack> iterator = items.iterator();
+        while (iterator.hasNext() && remainingToRemove > 0) {
+            ItemStack stack = iterator.next();
+            if (stack.getItem().getName().equals(itemName)) {
+                if (stack.getQuantity() <= remainingToRemove) {
+                    // 这一堆不够扣，把这一堆全删了，然后继续扣
+                    remainingToRemove -= stack.getQuantity();
+                    iterator.remove(); 
+                } else {
+                    // 这一堆足够扣，扣完直接结束
+                    stack.setQuantity(stack.getQuantity() - remainingToRemove);
+                    remainingToRemove = 0;
+                }
+            }
+        }
+        
+        if (remainingToRemove > 0) {
+            System.out.println("警告：背包中[" + itemName + "]数量不足，实际少扣了 " + remainingToRemove + " 个。");
+        }
+    }
+
+    /**
+     * 统计背包中某种物品的总数量
+     */
+    public int getItemCount(String itemName) {
+        int total = 0;
+        for (ItemStack stack : items) {
+            if (stack.getItem().getName().equals(itemName)) {
+                total += stack.getQuantity();
+            }
+        }
+        return total;
+    }
+
+    /**
+     * 打印背包状态
+     */
+    public void display() {
+        System.out.println("=== 当前背包状态 (已用 " + items.size() + "/" + capacity + " 格) ===");
+        if (items.isEmpty()) {
+            System.out.println("背包空空如也。");
+        } else {
+            for (int i = 0; i < items.size(); i++) {
+                System.out.println("格子 " + i + ": " + items.get(i));
+            }
+        }
+        System.out.println("=========================================");
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        // 初始化物品元数据
+        Item stone = new Item("石头", 64);
+        Item wood = new Item("木板", 64);
+        Item sword = new Item("钻石剑", 1);
+
+        // 创建容量为 36 的背包
+        Inventory inventory = new Inventory(36);
+
+        System.out.println(">>> 1. 添加 30 个石头");
+        inventory.addItem(new ItemStack(stone, 30));
+        inventory.display();
+
+        System.out.println(">>> 2. 再次添加 40 个石头");
+        inventory.addItem(new ItemStack(stone, 40));
+        inventory.display();
+
+        System.out.println(">>> 3. 添加 1 把钻石剑");
+        inventory.addItem(new ItemStack(sword, 1));
+        inventory.display();
+
+        System.out.println(">>> 4. 尝试添加 35 堆 (每堆 64) 木板，测试溢出");
+        // 注意：由于背包已用 3 格（64石头，6石头，1剑），剩 33 格。
+        // 35 堆木板会填满 33 格，剩下 2 堆（128个）放不下。
+        int result = inventory.addItem(new ItemStack(wood, 35 * 64));
+        if (result < 0) {
+            System.out.println("添加失败！有 " + (-result) + " 个木板未能放入背包。");
+        }
+        // 背包格子满了，这里就不打印 36 行了，只打印总数量看看
+        System.out.println("当前背包木板总数: " + inventory.getItemCount("木板")); 
+
+        System.out.println("\n>>> 5. 移除 10 个石头");
+        inventory.removeItem("石头", 10);
+        // 为了方便看，过滤一下打印，只看有石头和剑的格子
+        inventory.display();
+
+        System.out.println("当前石头总数: " + inventory.getItemCount("石头"));
+    }
+}

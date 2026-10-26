@@ -1,0 +1,191 @@
+USERREQUEST
+
+package com.example.firstapi;
+
+public class UserRequest {
+    private String username;
+    private String password;
+
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+}
+
+USERSERVICE
+
+package com.example.firstapi;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+@Service
+public class UserService {
+
+    @Value("${app.data-file}")
+    private String dataFile;
+
+    @Value("${app.password.min-length}")
+    private int minPasswordLength;
+
+    @Value("${app.username.max-length}")
+    private int maxUsernameLength;
+
+    @Value("${app.username.pattern}")
+    private String usernamePattern;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // 1. 注册逻辑
+    public void register(UserRequest request) {
+        validateParams(request);
+
+        Map<String, String> users = readUsers();
+        if (users.containsKey(request.getUsername())) {
+            throw new IllegalArgumentException("用户名已存在");
+        }
+
+        // 密码加密（散列）
+        String hashedPassword = hashPassword(request.getPassword());
+        users.put(request.getUsername(), hashedPassword);
+        writeUsers(users);
+    }
+
+    // 2. 登录逻辑
+    public void login(UserRequest request) {
+        validateParams(request);
+
+        Map<String, String> users = readUsers();
+        String storedHash = users.get(request.getUsername());
+
+        if (storedHash == null || !storedHash.equals(hashPassword(request.getPassword()))) {
+            throw new IllegalArgumentException("用户名不存在或密码错误");
+        }
+    }
+
+    // 3. 参数校验（统一抽离）
+    private void validateParams(UserRequest request) {
+        if (request.getUsername() == null || request.getUsername().trim().isEmpty()) {
+            throw new IllegalArgumentException("用户名不能为空");
+        }
+        if (request.getPassword() == null || request.getPassword().trim().isEmpty()) {
+            throw new IllegalArgumentException("密码不能为空");
+        }
+        if (request.getUsername().length() > maxUsernameLength) {
+            throw new IllegalArgumentException("用户名长度不能超过 " + maxUsernameLength);
+        }
+        if (!Pattern.matches(usernamePattern, request.getUsername())) {
+            throw new IllegalArgumentException("用户名包含非法字符");
+        }
+        if (request.getPassword().length() < minPasswordLength) {
+            throw new IllegalArgumentException("密码长度不能少于 " + minPasswordLength);
+        }
+    }
+
+    // 4. 散列加密算法 (SHA-256)
+    private String hashPassword(String password) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("加密失败", e);
+        }
+    }
+
+    // 5. 读取 JSON 文件到 Map
+    private Map<String, String> readUsers() {
+        File file = new File(dataFile);
+        if (!file.exists()) return new HashMap<>();
+        try {
+            return objectMapper.readValue(file, new TypeReference<Map<String, String>>() {});
+        } catch (IOException e) {
+            return new HashMap<>();
+        }
+    }
+
+    // 6. 把 Map 写入 JSON 文件
+    private void writeUsers(Map<String, String> users) {
+        try {
+            objectMapper.writeValue(new File(dataFile), users);
+        } catch (IOException e) {
+            throw new RuntimeException("文件保存失败", e);
+        }
+    }
+}
+
+GLOBALEXCEPTIONHANDLER
+
+package com.example.firstapi;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import java.util.HashMap;
+import java.util.Map;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+    
+    // 拦截我们主动抛出的参数异常
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException e) {
+        Map<String, String> response = new HashMap<>();
+        response.put("error", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response); // 返回 400
+    }
+}
+
+USERCONTROLLER
+
+package com.example.firstapi;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/auth")
+public class UserController {
+
+    @Autowired
+    private UserService userService;
+
+    @PostMapping("/register")
+    public String register(@RequestBody UserRequest request) {
+        userService.register(request);
+        return "Success";
+    }
+
+    @PostMapping("/login")
+    public String login(@RequestBody UserRequest request) {
+        userService.login(request);
+        return "Success";
+    }
+}
+
+APPLICATION
+
+app:
+  data-file: users.json
+  password:
+    min-length: 6
+  username:
+    max-length: 15
+    pattern: "^[a-zA-Z0-9_]+$"

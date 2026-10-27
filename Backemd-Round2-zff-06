@@ -1,0 +1,113 @@
+USER.JAVA
+
+package com.example.firstapi.entity;
+
+public class User {
+    private Long id;
+    private String username;
+    private Integer age;
+    // 右键 -> Generate -> Getter and Setter 全选生成
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
+    public Integer getAge() { return age; }
+    public void setAge(Integer age) { this.age = age; }
+}
+
+USERMAPPER.JAVA
+
+package com.example.firstapi.mapper;
+
+import com.example.firstapi.entity.User;
+import org.apache.ibatis.annotations.*;
+import java.util.List;
+
+@Mapper // 告诉程序：这是管数据库的
+public interface UserMapper {
+    
+    // 存数据
+    @Insert("INSERT INTO user(username, age) VALUES(#{username}, #{age})")
+    void insert(User user);
+
+    // 分页查数据：LIMIT 查几条，OFFSET 是跳过几条
+    @Select("SELECT * FROM user LIMIT #{size} OFFSET #{offset}")
+    List<User> selectPage(@Param("offset") int offset, @Param("size") int size);
+    
+    // 查总数（前端做分页组件需要知道一共多少条）
+    @Select("SELECT COUNT(*) FROM user")
+    long countAll();
+}
+
+USERSERVICE.JAVA
+
+package com.example.firstapi.service;
+
+import com.example.firstapi.entity.User;
+import com.example.firstapi.mapper.UserMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@Service
+public class UserService {
+
+    @Autowired // 自动把库管员拉过来
+    private UserMapper userMapper;
+
+    public void addUser(User user) {
+        userMapper.insert(user); // 让他去存
+    }
+
+    // 分页业务：算算应该跳过几条
+    public Map<String, Object> getPagedUsers(int page, int size) {
+        // 比如第2页，每页5条，说明前面5条已经看过了，要跳过5条。
+        // 公式：(页码 - 1) * 每页条数
+        int offset = (page - 1) * size; 
+        
+        List<User> data = userMapper.selectPage(offset, size);
+        long total = userMapper.countAll();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("总条数", total);
+        result.put("当前页码", page);
+        result.put("每页条数", size);
+        result.put("数据列表", data);
+        return result;
+    }
+}
+
+USERCONTROLLER.JAVA
+package com.example.firstapi.controller;
+
+import com.example.firstapi.entity.User;
+import com.example.firstapi.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/user")
+public class UserController {
+
+    @Autowired 
+    private UserService userService;
+
+    // 任务一 & 二：存数据 (POST)
+    @PostMapping
+    public String add(@RequestBody User user) {
+        userService.addUser(user);
+        return "存入成功！";
+    }
+
+    // 任务三：分页查询 (GET)
+    // 默认第1页，每页3条（防止前端不传参报错）
+    @GetMapping
+    public Map<String, Object> list(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "3") int size) {
+        return userService.getPagedUsers(page, size);
+    }
+}

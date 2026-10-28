@@ -1,0 +1,415 @@
+GRADLE
+
+dependencies {
+    // ... 之前的依赖
+    // JWT 生成与解析库
+    implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
+    // 密码加密工具（包含 BCrypt 算法）
+    implementation 'org.springframework.security:spring-security-crypto:6.2.0'
+}
+
+
+
+
+
+APPLICATION.yml
+
+app:
+  security:
+    # 这里可以改成 MD5 或 BCRYPT
+    password-algorithm: BCRYPT
+  jwt:
+    secret: "ThisIsAVerySecretKeyForJwtSigningMustBeLongEnough!" # 加密盐
+    expiration: 1800000 # Token过期时间，30分钟（毫秒）
+
+重新建表
+
+USE test_db;
+DROP TABLE IF EXISTS user;
+CREATE TABLE `user` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `username` VARCHAR(50) NOT NULL,
+  `password` VARCHAR(255) NOT NULL, -- 散列后通常很长
+  `role` VARCHAR(20) NOT NULL DEFAULT 'USER', -- 'USER' 或 'ADMIN'
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `idx_username` (`username`) -- 唯一索引，防重复注册
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+
+
+
+密码加密策略
+
+package com.example.firstapi.security;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.stereotype.Component;
+import java.security.MessageDigest;
+
+@Component
+public class PasswordStrategy {
+
+    @Value("${app.security.password-algorithm:MD5}")
+    private String algorithm;
+
+    public String encode(String rawPassword) {
+        if ("BCRYPT".equalsIgnoreCase(algorithm)) {
+            return new BCryptPasswordEncoder().encode(rawPassword);
+        } else {
+            // 默认 MD5
+            try {
+                MessageDigest md = MessageDigest.getInstance("MD5");
+                byte[] digest = md.digest(rawPassword.getBytes());
+                StringBuilder sb = new StringBuilder();
+                for (byte b : digest) sb.append(String.format("%02x", b));
+                return sb.toString();
+            } catch (Exception e) {
+                throw new RuntimeException("加密失败", e);
+            }
+        }
+    }
+
+    // 密码匹配（BCrypt 不能直接比对字符串，必须用它的 matches 方法）
+    public boolean matches(String rawPassword, String encodedPassword) {
+        if ("BCRYPT".equalsIgnoreCase(algorithm)) {
+            return new BCryptPasswordEncoder().matches(rawPassword, encodedPassword);
+        } else {
+            return encode(rawPassword).equals(encodedPassword);
+        }
+    }
+}
+
+
+
+
+
+
+JwtInterception.java
+
+package com.example.firstapi.security;
+
+import io.jsonwebtoken.Claims;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerInterceptor;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+@Component 
+public class JwtInterceptor implements HandlerInterceptor {
+
+    @Autowired
+    private JwtUtil jwtUtil; 
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        
+        // 1. 如果是浏览器的跨域预检请求（OPTIONS），直接放行
+        if ("OPTIONS".equals(request.getMethod())) {
+            return true; 
+        }
+
+        // 2. 从请求头（Header）里找名为 "Authorization" 的字段
+        String token = request.getHeader("Authorization");
+        
+        // 3. 如果没找到，或者格式不对（必须是 Bearer 开头），直接打回
+        if (token == null || !token.startsWith("Bearer ")) {
+            response.setStatus(401); // 401 代表未授权
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"error\": \"未登录或凭证缺失，请先登录\"}");
+            return false; // false 表示拦截，不往下走了
+        }
+
+        try {
+            // 4. 去掉 "Bearer " 这 7 个字符，拿到真正的 token 字符串并解析
+            String realToken = token.substring(7);
+            Claims claims = jwtUtil.parseToken(realToken);
+
+            // 5. 解析成功！把用户 ID 和角色存到 request 域里，后面的 Controller 随时能取
+            request.setAttribute("userId", claims.get("userId", Long.class));
+            request.setAttribute("role", claims.get("role", String.class));
+
+            return true; // true 表示放行，让请求继续去找 Controller
+            
+        } catch (Exception e) {
+            // 如果解析报错（比如 token 被篡改了，或者过期了），就打回
+            response.setStatus(401);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"error\": \"凭证无效或已过期，请重新登录\"}");
+            return false;
+        }
+    }
+}
+
+
+
+
+
+
+
+
+JwtUtil.java
+
+package com.example.firstapi.security;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtUtil {
+
+    @Value("${app.jwt.secret}")
+    private String secret;
+
+    @Value("${app.jwt.expiration}")
+    private long expiration;
+
+    private Key getKey() {
+        return Keys.hmacShaKeyFor(secret.getBytes());
+    }
+
+    // 生成 Token
+    public String generateToken(Long userId, String username, String role) {
+        return Jwts.builder()
+                .claim("userId", userId)
+                .claim("role", role)
+                .setSubject(username)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + expiration))
+                .signWith(getKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    // 解析 Token
+    public Claims parseToken(String token) {
+        return Jwts.parserBuilder().setSigningKey(getKey()).build().parseClaimsJws(token).getBody();
+    }
+}
+
+
+
+
+
+
+
+
+entity-user.java
+
+package com.example.firstapi.entity;
+
+public class User {
+    private Long id;
+    private String username;
+    private String password; // 密码
+    private String role;     // 角色：USER 或 ADMIN
+
+    // 生成 Getter 和 Setter
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
+}
+
+
+
+
+
+
+
+
+MAPPER
+
+package com.example.firstapi.mapper;
+
+import com.example.firstapi.entity.User;
+import org.apache.ibatis.annotations.*;
+
+@Mapper
+public interface UserMapper {
+
+    // 1. 注册：把用户存进数据库（包含角色）
+    // 注意：用 #{} 是 MyBatis 的预编译，能自动防 SQL 注入
+    @Insert("INSERT INTO user(username, password, role) VALUES(#{username}, #{password}, #{role})")
+    void insert(User user);
+
+    // 2. 登录查岗：根据用户名找用户（因为登录时用户只传了用户名和密码）
+    @Select("SELECT * FROM user WHERE username = #{username}")
+    User findByUsername(String username);
+
+    // 3. 权限校验查岗：根据 ID 找用户（用于查某人信息）
+    @Select("SELECT * FROM user WHERE id = #{id}")
+    User findById(Long id);
+}
+
+
+
+
+
+
+
+WebConfig.java
+
+package com.example.firstapi.config;
+
+import com.example.firstapi.security.JwtInterceptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+    @Autowired 
+    private JwtInterceptor jwtInterceptor;
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(jwtInterceptor)
+                .addPathPatterns("/api/**") // 拦截所有 /api/ 开头的请求
+                .excludePathPatterns("/api/auth/login", "/api/auth/register"); // 登录和注册大门不用查门禁卡
+    }
+}
+
+
+
+
+
+
+UserService
+
+package com.example.firstapi.service;
+
+import com.example.firstapi.entity.User;
+import com.example.firstapi.mapper.UserMapper;
+import com.example.firstapi.security.JwtUtil;
+import com.example.firstapi.security.PasswordStrategy;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Service // 告诉 Spring：这是大堂经理，归你管
+public class UserService {
+
+    // 把需要的工具（库管员、加密机、发证机）都拿过来
+    @Autowired private UserMapper userMapper;
+    @Autowired private PasswordStrategy passwordStrategy;
+    @Autowired private JwtUtil jwtUtil;
+
+    // 1. 注册逻辑
+    public void register(User user) {
+        // 第一步：去冷库查查，这个名字是不是已经有人用了？
+        if (userMapper.findByUsername(user.getUsername()) != null) {
+            throw new RuntimeException("用户名已存在，换一个吧！");
+        }
+        
+        // 第二步：把明文密码（如123456）放进加密机，变成乱码
+        String encryptedPassword = passwordStrategy.encode(user.getPassword());
+        user.setPassword(encryptedPassword);
+        
+        // 第三步：设置默认角色为普通用户
+        user.setRole("USER"); 
+        
+        // 第四步：让库管员把数据存进数据库
+        userMapper.insert(user);
+    }
+
+    // 2. 登录逻辑
+    public Map<String, String> login(String username, String rawPassword) {
+        // 第一步：去冷库把这个用户找出来
+        User user = userMapper.findByUsername(username);
+        
+        // 第二步：如果找不到人，或者加密机比对密码不对，直接打回
+        if (user == null || !passwordStrategy.matches(rawPassword, user.getPassword())) {
+            throw new RuntimeException("用户名或密码错误");
+        }
+        
+        // 第三步：密码对了！用 JWT 工具生成一张防伪通行证（Token）
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
+        
+        // 第四步：把 Token 装进一个盒子返回给前台
+        Map<String, String> result = new HashMap<>();
+        result.put("token", token);
+        result.put("message", "登录成功");
+        return result;
+    }
+
+    // 3. 查询用户信息（供前端展示）
+    public User getUserById(Long id) {
+        return userMapper.findById(id);
+    }
+}
+
+
+
+
+
+UserController
+
+package com.example.firstapi.controller;
+
+import com.example.firstapi.entity.User;
+import com.example.firstapi.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api")
+public class UserController {
+
+    @Autowired
+    private UserService userService;
+
+    // 1. 注册接口（POST）
+    @PostMapping("/auth/register")
+    public String register(@RequestBody User user) {
+        userService.register(user);
+        return "注册成功！";
+    }
+
+    // 2. 登录接口（POST）
+    @PostMapping("/auth/login")
+    public Map<String, String> login(@RequestBody User user) {
+        // 把前台收到的账号密码，交给经理处理
+        return userService.login(user.getUsername(), user.getPassword());
+    }
+
+    // 3. 获取用户信息接口（GET）
+    @GetMapping("/user/{id}")
+    public User getUser(@PathVariable Long id, HttpServletRequest request) {
+        // 别忘了，我们的 JwtInterceptor 门卫大爷已经把身份信息塞进 request 里了
+        Long currentUserId = (Long) request.getAttribute("userId");
+        String role = (String) request.getAttribute("role");
+
+        // 核心权限控制：如果角色不是 ADMIN，而且查的又不是自己的ID，直接拒绝！
+        if (!"ADMIN".equals(role) && !currentUserId.equals(id)) {
+            throw new RuntimeException("403 无权限：普通用户只能查看自己的信息！");
+        }
+        
+        // 放行，去数据库捞数据
+        return userService.getUserById(id);
+    }
+}
